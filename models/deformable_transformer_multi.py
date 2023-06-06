@@ -17,13 +17,17 @@ import torch.nn.functional as F
 from torch import nn, Tensor
 from torch.nn.init import xavier_uniform_, constant_, uniform_, normal_
 
+
 from util.misc import inverse_sigmoid
 from models.ops.modules import MSDeformAttn
 from mmcv import ops
 from util import box_ops
 
-from mmdet.core import bbox2result, bbox2roi, bbox_xyxy_to_cxcywh
-from mmdet.core.bbox.samplers import PseudoSampler
+# from mmdet.core import bbox2result, bbox2roi, bbox_xyxy_to_cxcywh # 废弃
+# from mmdet.core.bbox.samplers import PseudoSampler  # 废弃
+from mmdet.structures.bbox import bbox2result, bbox2roi, bbox_xyxy_to_cxcywh
+from mmdet.models.task_modules.samplers.pseudo_sampler import PseudoSampler
+
 from models.sparse_roi_head.head import RCNNHead 
 
 
@@ -443,8 +447,7 @@ class DeformableTransformer(nn.Module):
             # print("final_references", final_references_out.shape)
             return hs[:,0:1,:,:], init_reference_out[0:1], inter_references_out[:,0:1,:,:], None, None, final_hs, final_references_out, out
 
-            
-        return hs[:,0:1,:,:], init_reference_out[0:1], inter_references_out[:,0:1,:,:], None, None, final_hs, final_references_out, out
+        # return hs[:,0:1,:,:], init_reference_out[0:1], inter_references_out[:,0:1,:,:], None, None, final_hs, final_references_out, out
 
 
 class TemporalQueryEncoderLayer(nn.Module):
