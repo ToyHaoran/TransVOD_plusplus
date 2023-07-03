@@ -2,5 +2,5 @@ pycocotools
 tqdm
 cython
 scipy
-mmcv-full
+mmcv
 mmdet
