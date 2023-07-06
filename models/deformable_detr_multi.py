@@ -457,14 +457,14 @@ def build(args):
     device = torch.device(args.device)
 
     if 'swin' in args.backbone:
-        print('yes')
+        print('使用swin作为backbone')
         from .swin_transformer import build_swin_backbone
         backbone = build_swin_backbone(args) 
     else:
-        backbone = build_backbone(args)
+        backbone = build_backbone(args)  # 如ResNet101等
     # backbone = build_backbone(args)
 
-    transformer = build_deforamble_transformer(args)
+    transformer = build_deforamble_transformer(args)  # 构建DeformableTransformer
     model = DeformableDETR(
         backbone,
         transformer,
@@ -478,14 +478,14 @@ def build(args):
     )
     if args.masks:
         model = DETRsegm(model, freeze_detr=(args.frozen_weights is not None))
-    matcher = build_matcher(args)
+    matcher = build_matcher(args)  # 匈牙利算法
     weight_dict = {'loss_ce': args.cls_loss_coef, 'loss_bbox': args.bbox_loss_coef}
-    weight_dict['loss_giou'] = args.giou_loss_coef
+    weight_dict['loss_giou'] = args.giou_loss_coef  # coef表示权重coefficient，用来调整各个损失的重要性。
     if args.masks:
         weight_dict["loss_mask"] = args.mask_loss_coef
         weight_dict["loss_dice"] = args.dice_loss_coef
     # TODO this is a hack
-    if args.aux_loss:
+    if args.aux_loss:  # 辅助损失 auxiliary loss
         aux_weight_dict = {}
         for i in range(args.dec_layers - 1):
             aux_weight_dict.update({k + f'_{i}': v for k, v in weight_dict.items()})
@@ -496,9 +496,9 @@ def build(args):
     if args.masks:
         losses += ["masks"]
     # num_classes, matcher, weight_dict, losses, focal_alpha=0.25
-    criterion = SetCriterion(num_classes, matcher, weight_dict, losses, focal_alpha=args.focal_alpha)
+    criterion = SetCriterion(num_classes, matcher, weight_dict, losses, focal_alpha=args.focal_alpha)  # 损失函数criterion
     criterion.to(device)
-    postprocessors = {'bbox': PostProcess()}
+    postprocessors = {'bbox': PostProcess()}  # 后处理
     if args.masks:
         postprocessors['segm'] = PostProcessSegm()
         if args.dataset_file == "coco_panoptic":

@@ -25,9 +25,9 @@ from datasets.data_prefetcher_multi import data_prefetcher
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
                     device: torch.device, epoch: int, max_norm: float = 0):
-    model.train()
+    model.train()  # 设置为训练模式
     criterion.train()
-    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger = utils.MetricLogger(delimiter="  ")  # 用于记录训练过程中的指标。
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
     metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
     metric_logger.add_meter('grad_norm', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
@@ -43,18 +43,19 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
     # for _ in metric_logger.log_every(range(len(data_loader)), print_freq, header):
 
-        # assert samples is None, samples
-        # outputs = model(samples)
+        # 迭代数据 sample表示15个样本数据，tensor为(15,3,H,W)和mask为(15,H,W)；target表示目标的label、box以及各种信息。
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-        # print("targets", targets)
-        # print("input model", type(samples))
-        outputs = model(samples)
-        loss_dict = criterion(outputs, targets)
+
+        # outputs包括pred_logits(1,100,31)，pred_boxes(1,100,4),aux_outputs
+        outputs = model(samples)  # 输入模型，然后得到输出。重点是模型。
+        loss_dict = criterion(outputs, targets)  # 计算一大堆损失
         weight_dict = criterion.weight_dict
+
+        # 计算加权损失，根据权重字典对各个损失项进行加权求和。
         losses = sum(loss_dict[k] * weight_dict[k] for k in loss_dict.keys() if k in weight_dict)
  
-        # reduce losses over all GPUs for logging purposes
+        # reduce losses over all GPUs for logging purposes 就是简化loss字典，以便在多GPU上记录日志
         loss_dict_reduced = utils.reduce_dict(loss_dict)
         loss_dict_reduced_unscaled = {f'{k}_unscaled': v
                                       for k, v in loss_dict_reduced.items()}
@@ -62,7 +63,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                                     for k, v in loss_dict_reduced.items() if k in weight_dict}
         losses_reduced_scaled = sum(loss_dict_reduced_scaled.values())
 
-        loss_value = losses_reduced_scaled.item()
+        loss_value = losses_reduced_scaled.item()  # 最终的loss
 
         if not math.isfinite(loss_value):
             print("Loss is {}, stopping training".format(loss_value))
@@ -77,20 +78,12 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             grad_total_norm = utils.get_total_grad_norm(model.parameters(), max_norm)
         optimizer.step()
 
+        # 用于更新MetricLogger中的指标
         metric_logger.update(loss=loss_value, **loss_dict_reduced_scaled, **loss_dict_reduced_unscaled)
         metric_logger.update(class_error=loss_dict_reduced['class_error'])
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(grad_norm=grad_total_norm)
 
-        # samples, ref_samples, targets = prefetcher.next()
-        # try: 
-        #     samples, targets = data_loader_iter.next()
-        # except StopIteration:
-        #     data_loader_iter = iter(data_loader)
-        #     samples,targets = data_loader_iter.next()
-        # samples = samples.to(device)
-        # targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
-    # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}

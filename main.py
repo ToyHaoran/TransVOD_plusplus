@@ -14,6 +14,7 @@ import json
 import random
 import time
 from pathlib import Path
+import sys
 
 import numpy as np
 import torch
@@ -161,16 +162,23 @@ def main(args):
     np.random.seed(seed)
     random.seed(seed)
 
+    # 构建模型、评价标准、后处理
     model, criterion, postprocessors = build_model(args)
     model.to(device)
 
+    # 计算模型的参数量
     model_without_ddp = model
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print('number of params:', n_parameters)
 
-    dataset_train = build_dataset(image_set='train_joint', args=args)
+    # 构建数据集train和val
+    if sys.platform.startswith('linux'):
+        dataset_train = build_dataset(image_set='train_joint', args=args)  # 使用联合训练数据
+    else:
+        dataset_train = build_dataset(image_set='train_vid', args=args)  # win调试用
     dataset_val = build_dataset(image_set='val', args=args)
 
+    # 判断是否是分布式
     if args.distributed:
         print("11111")
         if args.cache_mode:
@@ -186,6 +194,7 @@ def main(args):
     batch_sampler_train = torch.utils.data.BatchSampler(
         sampler_train, args.batch_size, drop_last=True)
 
+    # 加载数据集，构建dataloader
     data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
                                    collate_fn=utils.collate_fn, num_workers=args.num_workers,
                                    pin_memory=True)
@@ -221,6 +230,8 @@ def main(args):
             "lr": args.lr * args.lr_linear_proj_mult,
         }
     ]
+
+    # 构建优化器，SGD或AdamW
     if args.sgd:
         optimizer = torch.optim.SGD(param_dicts, lr=args.lr, momentum=0.9,
                                     weight_decay=args.weight_decay)
@@ -246,6 +257,7 @@ def main(args):
         model_without_ddp.detr.load_state_dict(checkpoint['model'])
 
     output_dir = Path(args.output_dir)
+    # 是否断点续训
     if args.resume:
         if args.resume.startswith('https'):
             checkpoint = torch.hub.load_state_dict_from_url(
@@ -289,7 +301,7 @@ def main(args):
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
         return
 
-    print("Start training")
+    print("开始训练===========Start training")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
