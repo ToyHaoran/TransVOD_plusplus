@@ -41,9 +41,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     # samples = samples.to(device)
     # targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
-    # for _ in metric_logger.log_every(range(len(data_loader)), print_freq, header):
 
-        # 迭代数据 sample表示15个样本数据，tensor为(15,3,H,W)和mask为(15,H,W)；target表示目标的label、box以及各种信息。
+
+        # 迭代数据 sample表示1个关键帧+14个参考帧，tensor为(15,3,H,W)和mask为(15,H,W)；target表示目标的label、box以及各种信息。
         samples = samples.to(device)
         targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
 

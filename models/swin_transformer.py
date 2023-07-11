@@ -46,9 +46,9 @@ class Mlp(nn.Module):
 
 
 def window_partition(x, window_size):
-    """
+    """ 将输入张量按照指定的窗口大小划分为多个窗口
     Args:
-        x: (B, H, W, C)
+        x: (B, H, W, C) 输入张量
         window_size (int): window size
     Returns:
         windows: (num_windows*B, window_size, window_size, C)
@@ -125,7 +125,7 @@ class WindowAttention(nn.Module):
     def forward(self, x, mask=None):
         """ Forward function.
         Args:
-            x: input features with shape of (num_windows*B, N, C)
+            x: input features with shape of (num_windows*B, N, C)=(11340,49=7*7,128)
             mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or None
         """
         B_, N, C = x.shape
@@ -200,9 +200,9 @@ class SwinTransformerBlock(nn.Module):
     def forward(self, x, mask_matrix):
         """ Forward function.
         Args:
-            x: Input feature, tensor size (B, H*W, C).
+            x: Input feature, tensor size (B, H*W, C)=(15,35250,128).
             H, W: Spatial resolution of the input feature.
-            mask_matrix: Attention mask for cyclic shift.
+            mask_matrix: Attention mask for cyclic shift.=(756,49,49)
         """
         B, L, C = x.shape
         H, W = self.H, self.W
@@ -210,13 +210,13 @@ class SwinTransformerBlock(nn.Module):
 
         shortcut = x
         x = self.norm1(x)
-        x = x.view(B, H, W, C)
+        x = x.view(B, H, W, C)  # x此时为(15,141,250,128)
 
         # pad feature maps to multiples of window size
         pad_l = pad_t = 0
         pad_r = (self.window_size - W % self.window_size) % self.window_size
         pad_b = (self.window_size - H % self.window_size) % self.window_size
-        x = F.pad(x, (0, 0, pad_l, pad_r, pad_t, pad_b))
+        x = F.pad(x, (0, 0, pad_l, pad_r, pad_t, pad_b))  # x此时为(15,147,252,128)，即都为窗口大小7的倍数。
         _, Hp, Wp, _ = x.shape
 
         # cyclic shift
@@ -227,16 +227,16 @@ class SwinTransformerBlock(nn.Module):
             shifted_x = x
             attn_mask = None
 
-        # partition windows
-        x_windows = window_partition(shifted_x, self.window_size)  # nW*B, window_size, window_size, C
-        x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # nW*B, window_size*window_size, C
+        # partition windows，将x由(15,147,252,128)变为(11340=15*147*252/49,7,7,128)
+        x_windows = window_partition(shifted_x, self.window_size)  # (nW*B, window_size, window_size, C)=(11340,7,7,128)
+        x_windows = x_windows.view(-1, self.window_size * self.window_size, C)  # (11340,7*7=49,128)
 
-        # W-MSA/SW-MSA
-        attn_windows = self.attn(x_windows, mask=attn_mask)  # nW*B, window_size*window_size, C
+        # W-MSA/SW-MSA，调用WindowAttention.forward()
+        attn_windows = self.attn(x_windows, mask=attn_mask)  # (nW*B, window_size*window_size, C)=(11340,49,128)
 
         # merge windows
-        attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)
-        shifted_x = window_reverse(attn_windows, self.window_size, Hp, Wp)  # B H' W' C
+        attn_windows = attn_windows.view(-1, self.window_size, self.window_size, C)  # (11340,7,7,128)
+        shifted_x = window_reverse(attn_windows, self.window_size, Hp, Wp)  # (B H' W' C)=(15,147,252,128)
 
         # reverse cyclic shift
         if self.shift_size > 0:
@@ -247,7 +247,7 @@ class SwinTransformerBlock(nn.Module):
         if pad_r > 0 or pad_b > 0:
             x = x[:, :H, :W, :].contiguous()
 
-        x = x.view(B, H * W, C)
+        x = x.view(B, H * W, C)  # (15,35250,128)
 
         # FFN
         x = shortcut + self.drop_path(x)
@@ -360,13 +360,13 @@ class BasicLayer(nn.Module):
     def forward(self, x, H, W):
         """ Forward function.
         Args:
-            x: Input feature, tensor size (B, H*W, C).
+            x: Input feature, tensor size (B, H*W, C)=(15,141*252,128).
             H, W: Spatial resolution of the input feature.
         """
 
-        # calculate attention mask for SW-MSA
-        Hp = int(np.ceil(H / self.window_size)) * self.window_size
-        Wp = int(np.ceil(W / self.window_size)) * self.window_size
+        # 为SW-MSA生成注意力掩码img_mask(每个值标记一个窗口)，以确定窗口之间的相互作用。
+        Hp = int(np.ceil(H / self.window_size)) * self.window_size  # Hp:147，窗口大小为7*7，所以这里要扩展为7的倍数。
+        Wp = int(np.ceil(W / self.window_size)) * self.window_size  # Wp:252
         img_mask = torch.zeros((1, Hp, Wp, 1), device=x.device)  # 1 Hp Wp 1
         h_slices = (slice(0, -self.window_size),
                     slice(-self.window_size, -self.shift_size),
@@ -374,28 +374,28 @@ class BasicLayer(nn.Module):
         w_slices = (slice(0, -self.window_size),
                     slice(-self.window_size, -self.shift_size),
                     slice(-self.shift_size, None))
-        cnt = 0
+        cnt = 0  # 计数器：为每个窗口分配一个唯一的标识(即掩码值)，以便在计算注意力时识别窗口之间的关系。
         for h in h_slices:
             for w in w_slices:
                 img_mask[:, h, w, :] = cnt
                 cnt += 1
-
-        mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size, window_size, 1
-        mask_windows = mask_windows.view(-1, self.window_size * self.window_size)
-        attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)
+        # img_mask为Tensor(1,147,252,1)，重新划分窗口后为(147*252/49=756,7,7,1)，共756个7*7的窗口。
+        mask_windows = window_partition(img_mask, self.window_size)  # nW, window_size=7, window_size=7, 1
+        mask_windows = mask_windows.view(-1, self.window_size * self.window_size)  # Tensor(756,49)
+        attn_mask = mask_windows.unsqueeze(1) - mask_windows.unsqueeze(2)  # Tensor(756,49,49)
         attn_mask = attn_mask.masked_fill(attn_mask != 0, float(-100.0)).masked_fill(attn_mask == 0, float(0.0))
 
-        for blk in self.blocks:
+        for blk in self.blocks:  # n个SwinTransformerBlock
             blk.H, blk.W = H, W
             if self.use_checkpoint:
                 print('use_checkpoint')
                 x = checkpoint.checkpoint(blk, x, attn_mask)
-            else:
-                x = blk(x, attn_mask)
-        if self.downsample is not None:
+            else:  # 调用SwinTransformerBlock.forward()
+                x = blk(x, attn_mask)  # x为(15,35250,128)，attn_mask为(756,49,49)
+        if self.downsample is not None:  # 论文中的Patch Merging
             x_down = self.downsample(x, H, W)
-            Wh, Ww = (H + 1) // 2, (W + 1) // 2
-            return x, H, W, x_down, Wh, Ww
+            Wh, Ww = (H + 1) // 2, (W + 1) // 2  # Ww=125, Wh=71是原来HW的一半。
+            return x, H, W, x_down, Wh, Ww  # x为(15,35250,128), x_down为(15,8875,256)
         else:
             return x, H, W, x, H, W
 
@@ -412,7 +412,7 @@ class PatchEmbed(nn.Module):
     def __init__(self, patch_size=4, in_chans=3, embed_dim=96, norm_layer=None):
         super().__init__()
         patch_size = to_2tuple(patch_size)
-        self.patch_size = patch_size
+        self.patch_size = patch_size  # patch大小 4*4
 
         self.in_chans = in_chans
         self.embed_dim = embed_dim
@@ -424,21 +424,27 @@ class PatchEmbed(nn.Module):
             self.norm = None
 
     def forward(self, x):
-        """Forward function."""
+        """Forward function. 论文中，将输入的图像切割成多个小图像块patches，并将这些图像块嵌入到一个高维的向量空间中。"""
         # padding
-        _, _, H, W = x.size()
-        if W % self.patch_size[1] != 0:
-            x = F.pad(x, (0, self.patch_size[1] - W % self.patch_size[1]))
-        if H % self.patch_size[0] != 0:
-            x = F.pad(x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))
+        _, _, H, W = x.size()  # x为Tensor(15,3,562,999)
 
-        x = self.proj(x)  # B C Wh Ww
+        # 对图像进行填充，保证图像可以被均匀切割成大小为4*4的patches
+        if W % self.patch_size[1] != 0:
+            x = F.pad(x, (0, self.patch_size[1] - W % self.patch_size[1]))  # 999变为1000
+        if H % self.patch_size[0] != 0:
+            x = F.pad(x, (0, 0, 0, self.patch_size[0] - H % self.patch_size[0]))  # 562变为564
+
+        # 将图像切分成大小为4*4的patches，并将每个patch投影到self.embed_dim维的空间中，即论文中Linear Embedding的48维映射为96维。
+        x = self.proj(x)  # B C Wh Ww  这里是SwinB，HW/4，维度由48变为128，故由(15,3,564,1000)变为(15,128,141,250)，
+
+        # 进行归一化处理
         if self.norm is not None:
             Wh, Ww = x.size(2), x.size(3)
             x = x.flatten(2).transpose(1, 2)
             x = self.norm(x)
             x = x.transpose(1, 2).view(-1, self.embed_dim, Wh, Ww)
 
+        # 最终x为Tensor(15,128,141,250)
         return x
 
 
@@ -595,38 +601,38 @@ class SwinTransformer(nn.Module):
 
     def forward(self, x):
         """Forward function."""
-        x = self.patch_embed(x)
-        Wh, Ww = x.size(2), x.size(3)
-        if self.ape:
+        x = self.patch_embed(x)  # PatchEmbed.forward()
+        Wh, Ww = x.size(2), x.size(3)  # x为Tensor(15,128,141,250)
+        if self.ape:  # 若为True，表示模型使用了绝对位置编码
             # interpolate the position embedding to the corresponding size
             absolute_pos_embed = F.interpolate(self.absolute_pos_embed, size=(Wh, Ww), mode='bicubic')
             x = (x + absolute_pos_embed).flatten(2).transpose(1, 2)  # B Wh*Ww C
-        else:
-            x = x.flatten(2).transpose(1, 2)
-        x = self.pos_drop(x)
+        else:  # 为了与Transformer模型的输入要求保持一致，进行扁平化和转置操作。
+            x = x.flatten(2).transpose(1, 2)  # x变为Tensor(15,Wh*Ww=35250,128)，其中35250为序列长度/token数/patch数。
+        x = self.pos_drop(x)  # 提高模型的泛化能力和鲁棒性。
 
         outs = []
         for i in range(self.num_layers):
-            # print('i', i)
-            layer = self.layers[i]
-            x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)
+            # 对应论文中的4个stage，每个Stage都有多个Swin Transformer block和Patch Merging
+            layer = self.layers[i]  # 第i个BasicLayer对应论文中第i个stage。
+            x_out, H, W, x, Wh, Ww = layer(x, Wh, Ww)  # 调用BasicLayer.forward()，即n个SwinTransformerblock和1个Patch Merging
             if i in self.out_indices:
                 norm_layer = getattr(self, f'norm{i}')
                 x_out = norm_layer(x_out)
                 out = x_out.view(-1, H, W, self.num_features[i]).permute(0, 3, 1, 2).contiguous()
                 outs.append(out)
-        
+
         # Modified swin-based backbone via feature aggregation
         rets = {str(u): v for (u,v) in enumerate(outs)}
-        feat_fpn = self.fpn(rets)        
+        feat_fpn = self.fpn(rets)  # FeaturePyramidNetwork
         bs, dim, size_h, size_w = feat_fpn['0'].shape
-        feat_aggregate = feat_fpn['0'] # torch.Size([1, 256, 25, 34])
+        feat_aggregate = feat_fpn['0']  # torch.Size([1, 256, 25, 34])
         outs_agg = []
         for k, v in feat_fpn.items():
             if k!='0':
                 feat = F.interpolate(feat_fpn[k], size=(size_h, size_w), scale_factor=None, mode='bilinear', align_corners=None)
                 feat_aggregate = feat_aggregate + feat
-        outs_agg.append(feat_aggregate) # torch.Size([1, 1024, 7, 9]
+        outs_agg.append(feat_aggregate)  # torch.Size([1, 1024, 7, 9]
 
         rets_agg = {str(u): v for (u,v) in enumerate(outs_agg)}
 
@@ -646,7 +652,7 @@ class BackboneBase(nn.Module):
         self.body = backbone
 
     def forward(self, tensor_list: NestedTensor):
-        xs = self.body(tensor_list.tensors)
+        xs = self.body(tensor_list.tensors)  # SwinTransformer.forward()
         out: Dict[str, NestedTensor] = {}
         for name, x in xs.items():
             m = tensor_list.mask
@@ -679,7 +685,7 @@ class Joiner(nn.Sequential):
         self.num_channels = backbone.num_channels
 
     def forward(self, tensor_list: NestedTensor):
-        xs = self[0](tensor_list)
+        xs = self[0](tensor_list)  # BackboneBase.forward()
         out: List[NestedTensor] = []
         pos = []
         for name, x in sorted(xs.items()):

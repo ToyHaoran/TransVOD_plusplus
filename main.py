@@ -294,26 +294,24 @@ def main(args):
         if len(unexpected_keys) > 0:
             print('Unexpected Keys: {}'.format(unexpected_keys))
 
-    if args.eval:
+    if args.eval:  # 如果是训练模式，这里运行完就结束了。
         test_stats, coco_evaluator = evaluate(model, criterion, postprocessors,
                                               data_loader_val, base_ds, device, args.output_dir)
         if args.output_dir:
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
         return
 
-    print("开始训练===========Start training")
+    print("===========开始训练=======Start training=========")
     start_time = time.time()
     for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
+        if args.distributed:  # 分布式训练
             sampler_train.set_epoch(epoch)
         train_stats = train_one_epoch(
             model, criterion, data_loader_train, optimizer, device, epoch, args.clip_max_norm)
-        lr_scheduler.step()
+        lr_scheduler.step()  # 更新学习率
         print('args.output_dir', args.output_dir)
-        if args.output_dir:
+        if args.output_dir:  # 一个epoch之后，如果指定了输出目录，那么模型和训练状态会被保存下来。
             checkpoint_paths = [output_dir / 'checkpoint.pth']
-            # extra checkpoint before LR drop and every 5 epochs
-            # if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 1 == 0:
             if (epoch + 1) % 1 == 0:
                 checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
             for checkpoint_path in checkpoint_paths:
@@ -325,19 +323,15 @@ def main(args):
                     'args': args,
                 }, checkpoint_path)
 
-        #test_stats, coco_evaluator = evaluate(
-         #   model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
-        #)
-
+        # 整理并保存日志。
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
-
         if args.output_dir and utils.is_main_process():
             with (output_dir / "log.txt").open("a") as f:
                 f.write(json.dumps(log_stats) + "\n")
 
-
+    # 统计运行时间
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))

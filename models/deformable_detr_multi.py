@@ -129,9 +129,9 @@ class DeformableDETR(nn.Module):
                - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
 
             It returns a dict with the following elements:
-               - "pred_logits": the classification logits (including no-object) for all queries.
+               - "pred_logits": 预测的分类。the classification logits (including no-object) for all queries.
                                 Shape= [batch_size x num_queries x (num_classes + 1)]
-               - "pred_boxes": The normalized boxes coordinates for all queries, represented as
+               - "pred_boxes": 预测的边界框。The normalized boxes coordinates for all queries, represented as
                                (center_x, center_y, height, width). These values are normalized in [0, 1],
                                relative to the size of each individual image (disregarding possible padding).
                                See PostProcess for information on how to retrieve the unnormalized bounding box.
@@ -139,13 +139,14 @@ class DeformableDETR(nn.Module):
                                 dictionnaries containing the two above keys for each decoder layer.
         """
         if not isinstance(samples, NestedTensor):
-            samples = nested_tensor_from_tensor_list(samples)
+            samples = nested_tensor_from_tensor_list(samples)  # 将Tensor转为NestedTensor(tensors,mask)
         
 
-        bs, c, h, w = samples.tensors.shape # torch.Size([5, 3, 562, 999])
+        bs, c, h, w = samples.tensors.shape  # torch.Size([15, 3, 562, 999])
         imgs_whwh_shape = (w, h, w, h)
-        features, pos = self.backbone(samples)
-        # print('features[-1].tensors.shape', features[-1].tensors.shape)
+
+        # 经过backbone后，返回特征图和位置编码。
+        features, pos = self.backbone(samples)  # models.swin_transformer.Joiner.forward()
 
         srcs = []
         masks = []
@@ -172,7 +173,10 @@ class DeformableDETR(nn.Module):
         query_embeds = None
         if not self.two_stage:
             query_embeds = self.query_embed.weight
-        hs, init_reference, inter_references, enc_outputs_class, enc_outputs_coord_unact, final_hs, final_references_out, out = self.transformer(srcs, masks, pos, imgs_whwh_shape, query_embeds, self.class_embed[-1], self.bbox_embed[-1], self.temp_class_embed_list, self.temp_bbox_embed_list)
+        hs, init_reference, inter_references, enc_outputs_class, enc_outputs_coord_unact, \
+            final_hs, final_references_out, out = self.transformer(
+                srcs, masks, pos, imgs_whwh_shape, query_embeds, self.class_embed[-1], self.bbox_embed[-1],
+                self.temp_class_embed_list, self.temp_bbox_embed_list)
         
 
         outputs_classes = []
