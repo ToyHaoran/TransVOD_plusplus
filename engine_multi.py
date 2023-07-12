@@ -14,6 +14,8 @@ Train and eval functions used in main.py
 import math
 import os
 import sys
+import time
+import numpy as np
 from typing import Iterable
 
 import torch
@@ -34,14 +36,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     header = 'Epoch: [{}]'.format(epoch)
     print_freq = 10
 
-
-    # prefetcher = data_prefetcher(data_loader, device, prefetch=True)
-    # data_loader_iter = iter(data_loader)
-    # samples, targets = data_loader_iter.next()
-    # samples = samples.to(device)
-    # targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
     for samples, targets in metric_logger.log_every(data_loader, print_freq, header):
-
 
         # 迭代数据 sample表示1个关键帧+14个参考帧，tensor为(15,3,H,W)和mask为(15,H,W)；target表示目标的label、box以及各种信息。
         samples = samples.to(device)
@@ -87,8 +82,8 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
-import time 
-import numpy as np 
+
+
 @torch.no_grad()
 def evaluate1(model, criterion, postprocessors, data_loader, base_ds, device, output_dir):
     model.eval()

@@ -125,8 +125,8 @@ class DeformableDETR(nn.Module):
 
     def forward(self, samples: NestedTensor):
         """ The forward expects a NestedTensor, which consists of:
-               - samples.tensor: batched images, of shape [batch_size x 3 x H x W]
-               - samples.mask: a binary mask of shape [batch_size x H x W], containing 1 on padded pixels
+               - samples.tensor: batched images, of shape [batch_size x 3 x H x W] = [15,3,562,999]
+               - samples.mask: a binary mask of shape [batch_size x H x W]=[15,562,999], containing 1 on padded pixels
 
             It returns a dict with the following elements:
                - "pred_logits": 预测的分类。the classification logits (including no-object) for all queries.
@@ -140,23 +140,23 @@ class DeformableDETR(nn.Module):
         """
         if not isinstance(samples, NestedTensor):
             samples = nested_tensor_from_tensor_list(samples)  # 将Tensor转为NestedTensor(tensors,mask)
-        
+
 
         bs, c, h, w = samples.tensors.shape  # torch.Size([15, 3, 562, 999])
         imgs_whwh_shape = (w, h, w, h)
 
-        # 经过backbone后，返回特征图和位置编码。
+        # 经过backbone后，返回多级别的特征图和位置编码。swinb只有一个级别，其他的backbone可能有多级别特征图。
         features, pos = self.backbone(samples)  # models.swin_transformer.Joiner.forward()
 
         srcs = []
         masks = []
-        for l, feat in enumerate(features):
-            src, mask = feat.decompose()
-            srcs.append(self.input_proj[l](src))
+        for l, feat in enumerate(features):  # 遍历多级别特征图
+            src, mask = feat.decompose()  # 将NestedTensor分解为feature和mask
+            srcs.append(self.input_proj[l](src))  # 通道维度的转换，将输入特征图的通道数转换为hidden_dim
             masks.append(mask)
             assert mask is not None
 
-        if self.num_feature_levels > len(srcs):
+        if self.num_feature_levels > len(srcs):  # 根据需要将特征图的数量扩展到多级别
             _len_srcs = len(srcs)
             for l in range(_len_srcs, self.num_feature_levels):
                 if l == _len_srcs:
@@ -171,13 +171,14 @@ class DeformableDETR(nn.Module):
                 pos.append(pos_l)
 
         query_embeds = None
-        if not self.two_stage:
+        if not self.two_stage:  # 查询嵌入是一个可学习的参数矩阵，用于对每个查询进行编码。
             query_embeds = self.query_embed.weight
+
+        # 这里就进入了TransVOD论文中提到的各个模块。调用deformable_transformer_multi.DeformableTransformer.forward()
         hs, init_reference, inter_references, enc_outputs_class, enc_outputs_coord_unact, \
             final_hs, final_references_out, out = self.transformer(
                 srcs, masks, pos, imgs_whwh_shape, query_embeds, self.class_embed[-1], self.bbox_embed[-1],
                 self.temp_class_embed_list, self.temp_bbox_embed_list)
-        
 
         outputs_classes = []
         outputs_coords = []
@@ -185,10 +186,10 @@ class DeformableDETR(nn.Module):
         if self.two_stage:
             enc_outputs_coord = enc_outputs_coord_unact.sigmoid()
             out['enc_outputs'] = {'pred_logits': enc_outputs_class, 'pred_boxes': enc_outputs_coord}
-     
+
         if final_hs is not None:
-            reference = inverse_sigmoid(final_references_out)
-            output_class = self.temp_class_embed_list[2](final_hs)
+            reference = inverse_sigmoid(final_references_out)  # (1,100,4)
+            output_class = self.temp_class_embed_list[2](final_hs)  # (1,100,31)
             tmp = self.temp_bbox_embed_list[2](final_hs)
             if reference.shape[-1] == 4:
                 tmp += reference
@@ -196,8 +197,8 @@ class DeformableDETR(nn.Module):
                 assert reference.shape[-1] == 2
                 tmp[..., :2] += reference
             output_coord = tmp.sigmoid()
-            out["pred_logits"] = output_class
-            out["pred_boxes"] = output_coord 
+            out["pred_logits"] = output_class  # 预测的类别 (1,100,31)
+            out["pred_boxes"] = output_coord  # 预测的边界框 (1,100,4)
         return out
 
     @torch.jit.unused
